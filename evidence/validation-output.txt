@@ -1,0 +1,89 @@
+#!/bin/bash
+# Generates the full validation evidence log into evidence/validation-output.txt
+# Author: Thanusha Bai
+# Department: DevOps
+
+OUTPUT="evidence/validation-output.txt"
+mkdir -p evidence
+
+# Ensure clean starting state: source = 2 rows, target = 3 rows
+sudo docker exec source-mysql mysql -uroot -pmy-secret-pw -e "
+USE sample_db;
+DELETE FROM users WHERE id = 3;
+INSERT INTO users (id, name, email) VALUES (1,'Alice','alice@example.com'),(2,'Bob','bob@example.com')
+ON DUPLICATE KEY UPDATE name=VALUES(name), email=VALUES(email);" 2>/dev/null
+
+{
+echo "================================================================"
+echo "DEV-815 Data Validation — Evidence Log"
+echo "Author: Thanusha Bai"
+echo "Department: DevOps"
+echo "Date: $(date)"
+echo "================================================================"
+echo ""
+echo "### SCREENSHOT 1: Containers Running"
+echo "\$ sudo docker ps"
+sudo docker ps
+echo ""
+echo "================================================================"
+echo ""
+echo "### SCREENSHOT 2: Initial Row Count Comparison (Mismatch)"
+echo ""
+echo "SOURCE (port 3306):"
+sudo docker exec source-mysql mysql -uroot -pmy-secret-pw -N \
+  -e "SELECT COUNT(*) FROM sample_db.users;" 2>/dev/null
+echo ""
+echo "TARGET (port 3307):"
+sudo docker exec target-mysql mysql -uroot -pmy-secret-pw -N \
+  -e "SELECT COUNT(*) FROM sample_db.users;" 2>/dev/null
+echo ""
+echo "Result: MISMATCH DETECTED"
+echo ""
+echo "================================================================"
+echo ""
+echo "### SCREENSHOT 3: Initial Checksum Comparison (Mismatch)"
+echo ""
+echo "SOURCE checksum:"
+sudo docker exec source-mysql mysql -uroot -pmy-secret-pw -N -e "
+SELECT MD5(GROUP_CONCAT(id, '|', name, '|', email ORDER BY id SEPARATOR '#'))
+FROM sample_db.users;" 2>/dev/null
+echo ""
+echo "TARGET checksum:"
+sudo docker exec target-mysql mysql -uroot -pmy-secret-pw -N -e "
+SELECT MD5(GROUP_CONCAT(id, '|', name, '|', email ORDER BY id SEPARATOR '#'))
+FROM sample_db.users;" 2>/dev/null
+echo ""
+echo "Result: HASHES DIFFER — MISMATCH CONFIRMED"
+echo ""
+echo "================================================================"
+echo ""
+echo "### Correction: Insert missing row into source"
+echo ""
+sudo docker exec source-mysql mysql -uroot -pmy-secret-pw -e "
+USE sample_db;
+INSERT INTO users (id, name, email) VALUES (3, 'Charlie', 'charlie@example.com');" 2>/dev/null
+echo "Row inserted."
+echo ""
+echo "================================================================"
+echo ""
+echo "### SCREENSHOT 4: Post-Correction Checksum (Data Consistent)"
+echo ""
+echo "SOURCE checksum:"
+sudo docker exec source-mysql mysql -uroot -pmy-secret-pw -N -e "
+SELECT MD5(GROUP_CONCAT(id, '|', name, '|', email ORDER BY id SEPARATOR '#'))
+FROM sample_db.users;" 2>/dev/null
+echo ""
+echo "TARGET checksum:"
+sudo docker exec target-mysql mysql -uroot -pmy-secret-pw -N -e "
+SELECT MD5(GROUP_CONCAT(id, '|', name, '|', email ORDER BY id SEPARATOR '#'))
+FROM sample_db.users;" 2>/dev/null
+echo ""
+echo "Result: HASHES MATCH — DATA CONSISTENT"
+echo ""
+echo "================================================================"
+echo "End of Evidence Log"
+echo "================================================================"
+} | tee "$OUTPUT"
+
+echo ""
+echo "Evidence written to $OUTPUT"

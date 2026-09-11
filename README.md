@@ -43,6 +43,7 @@ Mariadb-to-pxc-data-validation/
 │ ├── setup-lab.sh # Starts two MySQL containers
 │ ├── row-count-validation.sh # Compares row counts
 │ ├── checksum-validation.sh # Compares MD5 checksums
+│ ├── generate-evidence.sh # Writes full evidence log
 │ └── cleanup-lab.sh # Removes lab containers
 │
 └── README.md
@@ -87,7 +88,14 @@ Step 4 — Correct the data and re-validate
 Insert the missing row into the source, then re-run the checksum script.
 The two hashes should now be identical.
 
-Step 5 — Clean up
+Step 5 — Generate the evidence log
+bash
+bash scripts/generate-evidence.sh
+This runs the full validation sequence end to end and writes every command
+and its output to evidence/validation-output.txt, so there is a saved
+audit trail of the whole exercise.
+
+Step 6 — Clean up
 bash
 bash scripts/cleanup-lab.sh
 Validation Results Summary
@@ -96,6 +104,25 @@ Initial	2 vs 3 — mismatch	No
 After fix	3 vs 3 — match	Yes
 The full analysis, reasoning, and production recommendations are in the
 report at docs/DEV-815-Data_Validation_Report.pdf.
+
+What Validation Actually Proves
+Row count validation answers one question: is everything here? It counts
+rows on the source and target and compares them. It catches missing tables,
+dropped rows, and extra rows that should not exist. It is fast, cheap, and
+the right first check after any migration.
+
+Checksum validation answers a different question: is everything correct?
+It reads every row, builds a fingerprint of the data, and compares that
+fingerprint between source and target. If the fingerprints match, the bytes
+are identical. If they differ, something changed — even if every row count
+matched perfectly. This is the layer that catches silent corruption, a
+single character changed in a field, a value swapped between rows, or a
+collation problem during transfer.
+
+The two methods are not alternatives. Row counts alone will miss corruption
+inside a row. Checksums alone are slower than they need to be on tables that
+can be eliminated with a cheap count first. Running them in order — counts
+first, checksums second — gives full coverage with the least cost.
 
 Key Learnings
 Row counts answer "is everything here?" — checksums answer "is everything correct?"
